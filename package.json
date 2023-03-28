@@ -1,0 +1,26 @@
+{
+  "name": "dumb_chapel_lsp",
+  "version": "0.0.1",
+  "description": "An extremely simple language server for the Chapel programming language",
+  "main": "src/main.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Stinners/dumb_chapel_lsp.git"
+  },
+  "author": "Chris Stinson",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Stinners/dumb_chapel_lsp/issues"
+  },
+  "homepage": "https://github.com/Stinners/dumb_chapel_lsp#readme",
+  "devDependencies": {
+    "typescript": "^5.0.2"
+  },
+  "dependencies": {
+    "vscode-languageserver": "^8.1.0",
+    "vscode-languageserver-textdocument": "^1.0.8"
+  }
+}

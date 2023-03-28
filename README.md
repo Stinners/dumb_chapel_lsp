@@ -1,2 +1,2 @@
 # dumb_chapel_lsp
-An extremely simple LSP for the Chapel Programming Language 
+An extremely simple language server for the Chapel programming language 
