@@ -17,6 +17,7 @@
   },
   "homepage": "https://github.com/Stinners/dumb_chapel_lsp#readme",
   "devDependencies": {
+    "@types/node": "^18.15.11",
     "typescript": "^5.0.2"
   },
   "dependencies": {
