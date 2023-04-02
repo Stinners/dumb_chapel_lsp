@@ -10,17 +10,20 @@ export type ChapelDiagnostic = {
 }
 
 const parse_error_line = (error_line: String): ChapelDiagnostic => {
+
 	const parts = error_line.split(":").map(str => str.trim());
 
 	const file = parts[0];
 	const line = parseInt(parts[1]);
 	const type = parts[2];
-	const message = parts.slice(3).join(":");
+	const message = parts.slice(2).join(":");
 
 	return {type, line, file, message};
 }
 
-const find_root = (target_file: string): string | undefined => {
+type LspRoot = string | undefined | null;
+
+const find_root = (target_file: string): LspRoot => {
 	let dir = path.dirname(target_file);
 	while (dir != "/") {
 		let files = fs.readdirSync(dir);
@@ -36,13 +39,17 @@ const find_root = (target_file: string): string | undefined => {
 	return undefined;
 }
 
-const read_includes = (target_file: string): Array<string> => {
-	let root_dir = find_root(target_file);
-	if (root_dir == undefined) {
+const read_includes = (root_dir: LspRoot): string[] => {
+	if (!root_dir) {
 		return [];
 	}
 
 	let includes_file = path.join(root_dir, '.chapel_lsp');
+
+	if (!fs.existsSync(includes_file)) {
+		return [];
+	}
+
 	let text = fs.readFileSync(includes_file, "utf8");
 
 	const lines = text.split("\n")
@@ -55,17 +62,15 @@ const read_includes = (target_file: string): Array<string> => {
 }
 
 
-const run_chapel = (target_file: string): Array<string> => {
+const run_chapel = (target_file: string, root_dir: LspRoot): Array<string> => {
 
-	const includes = read_includes(target_file);
+	const includes = read_includes(root_dir);
 
 	const command = ['chpl', target_file]
 		.concat(["--no-codegen", "--baseline"])
 		.concat(includes)
 		.join(' ');
 
-	console.log(command);
-	
 	try {
 		execSync(command, {stdio: "pipe"});
 		return [];
@@ -76,8 +81,33 @@ const run_chapel = (target_file: string): Array<string> => {
 	}
 }
 
-export const diagnose =(target_file: string): Array<ChapelDiagnostic> => {
-	let errors = run_chapel(target_file);
+/* The LSP server library returns URIs with the protocol in front
+ * e.g .file://<path>
+ * This function cleans that away so that we can use the paths easily
+ */
+const cleanUri = (str: LspRoot): LspRoot => {
+
+	if (!str) {
+		return str;
+	}
+
+	if (str.startsWith("file:\/\/\/")) {
+		str = str.slice(7);
+	}
+	return str;
+}
+
+
+
+export const diagnose = (targetPath: string, lspRoot: LspRoot): ChapelDiagnostic[] => {
+	targetPath = cleanUri(targetPath)!;
+	lspRoot = cleanUri(lspRoot);
+
+	if (!lspRoot) {
+		lspRoot = find_root(targetPath);
+	}
+
+	let errors = run_chapel(targetPath, lspRoot);
 	let diags = errors.map(parse_error_line);
 	return diags;
 }

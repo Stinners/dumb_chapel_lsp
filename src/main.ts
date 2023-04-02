@@ -6,13 +6,11 @@ import {
 	ProposedFeatures,
 	InitializeParams,
 	DidChangeConfigurationNotification,
-	CompletionItem,
-	CompletionItemKind,
-	TextDocumentPositionParams,
 	TextDocumentSyncKind,
 	InitializeResult,
-    DidSaveTextDocumentParams,
-	TextDocumentIdentifier,
+    ServerCapabilities,
+	TextDocumentSyncOptions,
+    TextDocumentChangeEvent,
 } from 'vscode-languageserver/node';
 
 import {
@@ -20,42 +18,81 @@ import {
 } from 'vscode-languageserver-textdocument';
 
 import { diagnose, ChapelDiagnostic } from "./chapel";
+import winston from 'winston';
 
-// Create a connection for the server, using Node's IPC as a transport.
-// Also include all preview / proposed LSP features.
-const connection = createConnection(ProposedFeatures.all);
 
-// Create a simple text document manager.
-const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
+const logFile = "/home/chris/Code/Experiments/Chapel/dumb_chapel_lsp/lsp_logs.log";
+
+const logger = winston.createLogger({
+	level: 'info',
+	format: winston.format.json(),
+	defaultMeta: { service: 'chapel-lsp' },
+	transports: [
+		new winston.transports.File({ filename: logFile })
+	]
+});
+
+const info = (message: string) => {
+	logger.log({ level: 'info', message });
+}
+
+/*==========================================================
+ *                     Starting Server 
+  ========================================================== */
+
+info('Starting Server');
+
+let connection = createConnection(ProposedFeatures.all);
+let documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 
 let hasConfigurationCapability = false;
 let hasWorkspaceFolderCapability = false;
+//let hasDiagnosticRelatedInformationCapability = false;
+
+// The value for the root directory found by the LSP Client
+let lspRoot: string | null | undefined = undefined;
 
 connection.onInitialize((params: InitializeParams) => {
-	const capabilities = params.capabilities;
+	info("onInitialize Event");
 
-	// Does the client support the `workspace/configuration` request?
-	// If not, we fall back using global settings.
+	if (params.workspaceFolders && params.workspaceFolders.length != 0) {
+		lspRoot = params.workspaceFolders[0].uri;
+	}
+	info(`Client Root ${lspRoot}`);
+
+	let capabilities = params.capabilities;
+
 	hasConfigurationCapability = !!(
 		capabilities.workspace && !!capabilities.workspace.configuration
 	);
+
 	hasWorkspaceFolderCapability = !!(
 		capabilities.workspace && !!capabilities.workspace.workspaceFolders
 	);
 
+	/*
+	hasDiagnosticRelatedInformationCapability = !!(
+		capabilities.textDocument &&
+		capabilities.textDocument.publishDiagnostics &&
+		capabilities.textDocument.publishDiagnostics.relatedInformation
+	);
+	*/
+
 	const result: InitializeResult = {
-		capabilities: {
-			textDocumentSync: {
+		capabilities: <ServerCapabilities>{
+			textDocumentSync: <TextDocumentSyncOptions>{
 				openClose: true,
 				change: TextDocumentSyncKind.Incremental,
+				willSave: true,
+				willSaveWaitUntil: true,
 				save: true,
 			},
-			// Tell the client that this server doesn't supports code completion.
-			completionProvider: {
+			completionProvider: { 
 				resolveProvider: false
 			}
 		}
-	};
+	}
+
 	if (hasWorkspaceFolderCapability) {
 		result.capabilities.workspace = {
 			workspaceFolders: {
@@ -67,89 +104,82 @@ connection.onInitialize((params: InitializeParams) => {
 });
 
 connection.onInitialized(() => {
+	info("onInitialized Event");
 	if (hasConfigurationCapability) {
-		// Register for all configuration changes.
 		connection.client.register(DidChangeConfigurationNotification.type, undefined);
 	}
+
 	if (hasWorkspaceFolderCapability) {
 		connection.workspace.onDidChangeWorkspaceFolders(_event => {
-			connection.console.log('Workspace folder change event received.');
-		});
-	}
+			connection.console.log("Workspace folder change event recieved");
+		})
+	};
 });
 
+/*==========================================================
+ *                       Settings
+  ========================================================== */
 
-connection.onDidChangeConfiguration((_) => {});
 
-
-
-// The content of a text document has changed. This event is emitted
-// when the text document first opened or when its content has changed.
-documents.onDidChangeContent((_) => {});
-
-const checkChapel = (textDoc: TextDocumentIdentifier): Array<ChapelDiagnostic> => {
-	let diagnostics = diagnose(textDoc.uri);
-	return diagnostics;
+interface Settings {
+	maxNumberOfProblems: number;
 }
 
-// This handler provides the initial list of the completion items.
-connection.onCompletion(
-	(_textDocumentPosition: TextDocumentPositionParams): CompletionItem[] => {
-		// The pass parameter contains the position of the text document in
-		// which code complete got requested. For the example we ignore this
-		// info and always provide the same completion items.
-		return [
-			{
-				label: 'TypeScript',
-				kind: CompletionItemKind.Text,
-				data: 1
-			},
-			{
-				label: 'JavaScript',
-				kind: CompletionItemKind.Text,
-				data: 2
-			}
-		];
-	}
-);
+const defaultSettings: Settings = { 
+	maxNumberOfProblems: 10,
+};
+let globalSettings: Settings = defaultSettings;
 
-connection.onDidSaveTextDocument((params: DidSaveTextDocumentParams) => {
-	let diags = checkChapel(params.textDocument);
-	let diagnostics: Array<Diagnostic> = [];
-	for (let chapelDiag of diags) {
-		let diag: Diagnostic = {
-			severity: DiagnosticSeverity.Error,
-			range: {
-				start: {line: chapelDiag.line, character: 0},
-				end: {line: chapelDiag.line, character: 1},
-			},
-			message: chapelDiag.message,
-			source: "Chapel",
-		};
-		diagnostics.push(diag);
-	}
-	connection.sendDiagnostics({ uri: params.textDocument.uri, diagnostics });
+//let documentSettings: Map<string, Thenable<Settings>> = new Map();
+
+connection.onDidChangeConfiguration(_change => {
+	// Don't do anything here for now - this probably wont actually get called 
+	info("onDidChangeConfiguration Event");
 });
 
-// This handler resolves additional information for the item selected in
-// the completion list.
-connection.onCompletionResolve(
-	(item: CompletionItem): CompletionItem => {
-		if (item.data === 1) {
-			item.detail = 'TypeScript details';
-			item.documentation = 'TypeScript documentation';
-		} else if (item.data === 2) {
-			item.detail = 'JavaScript details';
-			item.documentation = 'JavaScript documentation';
-		}
-		return item;
+documents.onDidClose(_e => {
+	info("onDidClose Event");
+});
+
+documents.onDidChangeContent(_change => {
+	info("onDidChange Event");
+});
+
+documents.onDidSave((change: TextDocumentChangeEvent<TextDocument>) => {
+	info("onDidSave Event");
+
+	let textDocument = change.document;
+	let targetPath = textDocument.uri;
+	let chapelDiags: ChapelDiagnostic[] = [];
+	try {
+		chapelDiags = diagnose(targetPath, lspRoot);
+	} catch (exception) {
+		info(`Exception: ${exception}`);
+		return;
 	}
-);
 
-// Make the text document manager listen on the connection
-// for open, change and close text document events
+	let diagnostics: Diagnostic[] = [];
+	chapelDiags.forEach(chapelDiag => {
+		info(`Diagnostic Line: ${chapelDiag.line}`);
+		let diagnostic: Diagnostic = {
+			severity: DiagnosticSeverity.Error,
+			range: {
+				start: { line: chapelDiag.line-1, character: 0 },
+				end: { line: chapelDiag.line-1, character: 0 },
+			},
+			message: chapelDiag.message,
+			source: "Chapel LSP",
+		};
+		diagnostics.push(diagnostic);
+	});
+
+	info(`Sending Diagnostics`);
+	connection.sendDiagnostics({ uri: targetPath, diagnostics });
+});
+
+connection.onDidChangeWatchedFiles(_change => {
+	info("onDidChangeWatchedFiles Event");
+});
+
 documents.listen(connection);
-
-// Listen on the connection
 connection.listen();
-
