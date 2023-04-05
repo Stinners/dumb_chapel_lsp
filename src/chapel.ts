@@ -39,25 +39,61 @@ const find_root = (target_file: string): LspRoot => {
 	return undefined;
 }
 
-const read_includes = (root_dir: LspRoot): string[] => {
-	if (!root_dir) {
-		return [];
-	}
-
-	let includes_file = path.join(root_dir, '.chapel_lsp');
+const readChapelLSPFile = (root_dir: string): Set<string> => {
+	const includes_file = path.join(root_dir, '.chapel_lsp');
 
 	if (!fs.existsSync(includes_file)) {
-		return [];
+		return new Set();
 	}
 
-	let text = fs.readFileSync(includes_file, "utf8");
+	const text = fs.readFileSync(includes_file, "utf8");
 
 	const lines = text.split("\n")
 					  .map(str => str.trim())
 					  .filter(str => str != "");
 
-	const includes = lines.map(filePath => path.join(root_dir!, filePath))
-						  .map(line => `-M ${line}`);
+	return new Set(lines);
+}
+
+const srcDirIncludes = (root_dir: string) : Set<string> => {
+	let includeDirs = new Set<string>();
+	const paths = [path.join(root_dir, "src/")];
+
+	while (paths.length != 0) {
+		let dir = paths.pop();
+		if (!dir || !fs.existsSync(dir)) {
+			continue;
+		}
+
+		let children = fs.readdirSync(dir);
+		let hasChplFiles = false;
+
+		for (let child of children) {
+			if (fs.lstatSync(child).isDirectory()) {
+				paths.push(child);
+			} else if (path.extname(child) == ".chpl") {
+				hasChplFiles = true;
+			}
+		}
+
+		if (hasChplFiles) {
+			includeDirs.add(dir);
+		}
+	}
+	return includeDirs;
+}
+
+const read_includes = (root_dir: LspRoot): string[] => {
+	if (!root_dir) {
+		return []; 
+	}
+
+	const lspFileIncludes = readChapelLSPFile(root_dir);
+	const srcIncludes = srcDirIncludes(root_dir);
+	const allIncludes = new Set(...lspFileIncludes, ...srcIncludes);
+
+	const includes = [...allIncludes].map(filePath => path.join(root_dir!, filePath))
+						                 .map(line => `-M ${line}`);
 	return includes
 }
 
