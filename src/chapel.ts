@@ -25,15 +25,17 @@ const parse_error_line = (error_line: String): ChapelDiagnostic => {
 
 type LspRoot = string | undefined | null;
 
-const find_root = (target_file: string): LspRoot => {
+const findRoot = (target_file: string): LspRoot => {
 	let dir = path.dirname(target_file);
 	while (dir != "/") {
 		let files = fs.readdirSync(dir);
 
-		if (files.includes(".chapel_lsp")) {
+		const hasRootFile = files.includes(".chapel_lsp")
+							|| files.includes(".git")
+							|| files.includes("mason.toml");
+
+		if (hasRootFile) {
 			return dir;
-		} else if (files.includes(".git")) {
-			break;
 		}
 
 		dir = path.parse(dir).dir;
@@ -88,11 +90,7 @@ const srcDirIncludes = (root_dir: string) : Set<string> => {
 	return includeDirs;
 }
 
-const read_includes = (root_dir: LspRoot): string[] => {
-	if (!root_dir) {
-		return []; 
-	}
-
+const read_includes = (root_dir: string): string[] => {
 	const fileIncludes = lspFileIncludes(root_dir);
 	const srcIncludes = srcDirIncludes(root_dir);
 	const allIncludes = new Set([...fileIncludes, ...srcIncludes]);
@@ -103,9 +101,7 @@ const read_includes = (root_dir: LspRoot): string[] => {
 }
 
 
-const run_chapel = (target_file: string, root_dir: LspRoot): Array<string> => {
-
-	const includes = read_includes(root_dir);
+const run_chapel = (target_file: string, includes: string[]): Array<string> => {
 
 	const command = ['chpl', target_file]
 		.concat(["--no-codegen", "--baseline"])
@@ -131,29 +127,22 @@ const run_chapel = (target_file: string, root_dir: LspRoot): Array<string> => {
  * This function cleans that away so that we can use the paths easily
  */
 const cleanUri = (str: LspRoot): LspRoot => {
-
-	if (!str) {
+	if (str && str.startsWith("file:\/\/\/")) {
+		return str.slice(7);
+	} else {
 		return str;
 	}
-
-	if (str.startsWith("file:\/\/\/")) {
-		str = str.slice(7);
-	}
-	return str;
 }
 
 
 
 export const diagnose = (targetPath: string, lspRoot: LspRoot): ChapelDiagnostic[] => {
-
 	targetPath = cleanUri(targetPath)!;
-	lspRoot = cleanUri(lspRoot);
+	lspRoot = cleanUri(lspRoot || findRoot(targetPath));
 
-	if (!lspRoot) {
-		lspRoot = find_root(targetPath);
-	}
+	const includes = lspRoot ? read_includes(lspRoot) : [];
 
-	let errors = run_chapel(targetPath, lspRoot);
+	let errors = run_chapel(targetPath, includes);
 	let diags = errors.map(parse_error_line);
 	return diags;
 }
