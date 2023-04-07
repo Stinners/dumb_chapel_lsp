@@ -18,23 +18,7 @@ import {
 } from 'vscode-languageserver-textdocument';
 
 import { diagnose, ChapelDiagnostic } from "./chapel";
-import winston from 'winston';
-
-
-const logFile = "/home/chris/Code/Experiments/Chapel/dumb_chapel_lsp/lsp_logs.log";
-
-const logger = winston.createLogger({
-	level: 'info',
-	format: winston.format.json(),
-	defaultMeta: { service: 'chapel-lsp' },
-	transports: [
-		new winston.transports.File({ filename: logFile })
-	]
-});
-
-const info = (message: string) => {
-	logger.log({ level: 'info', message });
-}
+import { info, error } from "./logger";
 
 /*==========================================================
  *                     Starting Server 
@@ -132,18 +116,11 @@ let globalSettings: Settings = defaultSettings;
 
 //let documentSettings: Map<string, Thenable<Settings>> = new Map();
 
-connection.onDidChangeConfiguration(_change => {
-	// Don't do anything here for now - this probably wont actually get called 
-	info("onDidChangeConfiguration Event");
-});
+connection.onDidChangeConfiguration(_change => {});
 
-documents.onDidClose(_e => {
-	info("onDidClose Event");
-});
+documents.onDidClose(_e => {});
 
-documents.onDidChangeContent(_change => {
-	info("onDidChange Event");
-});
+documents.onDidChangeContent(_change => {});
 
 documents.onDidSave((change: TextDocumentChangeEvent<TextDocument>) => {
 	info("onDidSave Event");
@@ -160,7 +137,7 @@ documents.onDidSave((change: TextDocumentChangeEvent<TextDocument>) => {
 
 	let diagnostics: Diagnostic[] = [];
 	chapelDiags.forEach(chapelDiag => {
-		info(`Diagnostic Line: ${chapelDiag.line}`);
+		error(`Diagnostic Line: ${chapelDiag.line}`);
 		let diagnostic: Diagnostic = {
 			severity: DiagnosticSeverity.Error,
 			range: {
@@ -173,13 +150,10 @@ documents.onDidSave((change: TextDocumentChangeEvent<TextDocument>) => {
 		diagnostics.push(diagnostic);
 	});
 
-	info(`Sending Diagnostics`);
 	connection.sendDiagnostics({ uri: targetPath, diagnostics });
 });
 
-connection.onDidChangeWatchedFiles(_change => {
-	info("onDidChangeWatchedFiles Event");
-});
+connection.onDidChangeWatchedFiles(_change => {});
 
 documents.listen(connection);
 connection.listen();

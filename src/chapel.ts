@@ -2,6 +2,8 @@ import { execSync } from "child_process";
 import path from "path";
 import fs from "fs";
 
+import { info } from "./logger";
+
 export type ChapelDiagnostic = {
 	type: string;
 	file: string; 
@@ -39,7 +41,7 @@ const find_root = (target_file: string): LspRoot => {
 	return undefined;
 }
 
-const readChapelLSPFile = (root_dir: string): Set<string> => {
+const lspFileIncludes = (root_dir: string): Set<string> => {
 	const includes_file = path.join(root_dir, '.chapel_lsp');
 
 	if (!fs.existsSync(includes_file)) {
@@ -50,14 +52,16 @@ const readChapelLSPFile = (root_dir: string): Set<string> => {
 
 	const lines = text.split("\n")
 					  .map(str => str.trim())
-					  .filter(str => str != "");
-
+					  .filter(str => str != "")
+					  .map(filePath => path.join(root_dir, filePath));
+	
 	return new Set(lines);
 }
 
 const srcDirIncludes = (root_dir: string) : Set<string> => {
 	let includeDirs = new Set<string>();
 	const paths = [path.join(root_dir, "src/")];
+
 
 	while (paths.length != 0) {
 		let dir = paths.pop();
@@ -68,7 +72,8 @@ const srcDirIncludes = (root_dir: string) : Set<string> => {
 		let children = fs.readdirSync(dir);
 		let hasChplFiles = false;
 
-		for (let child of children) {
+		for (let child_name of children) {
+			let child = path.join(dir, child_name);
 			if (fs.lstatSync(child).isDirectory()) {
 				paths.push(child);
 			} else if (path.extname(child) == ".chpl") {
@@ -88,12 +93,12 @@ const read_includes = (root_dir: LspRoot): string[] => {
 		return []; 
 	}
 
-	const lspFileIncludes = readChapelLSPFile(root_dir);
+	const fileIncludes = lspFileIncludes(root_dir);
 	const srcIncludes = srcDirIncludes(root_dir);
-	const allIncludes = new Set(...lspFileIncludes, ...srcIncludes);
+	const allIncludes = new Set([...fileIncludes, ...srcIncludes]);
 
-	const includes = [...allIncludes].map(filePath => path.join(root_dir!, filePath))
-						                 .map(line => `-M ${line}`);
+	const includes = [...allIncludes].map(line => `-M ${line}`);
+
 	return includes
 }
 
@@ -107,7 +112,11 @@ const run_chapel = (target_file: string, root_dir: LspRoot): Array<string> => {
 		.concat(includes)
 		.join(' ');
 
+	info(`Running: chpl ${command}`);
+
 	try {
+		// This will thrown an exception if the command returns a non-zero exit code 
+		// Which is what happens when the compiler raises any errors
 		execSync(command, {stdio: "pipe"});
 		return [];
 	} catch (exception: any) {
@@ -136,6 +145,7 @@ const cleanUri = (str: LspRoot): LspRoot => {
 
 
 export const diagnose = (targetPath: string, lspRoot: LspRoot): ChapelDiagnostic[] => {
+
 	targetPath = cleanUri(targetPath)!;
 	lspRoot = cleanUri(lspRoot);
 
