@@ -2,7 +2,7 @@ import { execSync } from "child_process";
 import path from "path";
 import fs from "fs";
 
-import { info } from "./logger";
+import { info, error } from "./logger";
 
 export type ChapelDiagnostic = {
 	type: string;
@@ -11,19 +11,27 @@ export type ChapelDiagnostic = {
 	message: string
 }
 
-const parse_error_line = (error_line: String): ChapelDiagnostic => {
+type LspRoot = string | undefined | null;
 
+const parse_error_line = (error_line: String): ChapelDiagnostic | undefined => {
 	const parts = error_line.split(":").map(str => str.trim());
+	if (parts.length < 3) {
+		return undefined;
+	}
 
 	const file = parts[0];
 	const line = parseInt(parts[1]);
 	const type = parts[2];
 	const message = parts.slice(2).join(":");
 
+	if (typeof(line) != 'number') {
+		error(`Invalid line number: ${line} parsed from line: ${error_line}`);
+		return undefined;
+	}
+
 	return {type, line, file, message};
 }
 
-type LspRoot = string | undefined | null;
 
 const findRoot = (target_file: string): LspRoot => {
 	let dir = path.dirname(target_file);
@@ -99,6 +107,37 @@ const read_includes = (root_dir: string): string[] => {
 
 	return includes
 }
+const groupBy = <T>(array: T[], grouper: any): T[][] => {
+	let groups = {};
+	for (let val of array) {
+		let group = grouper(val);
+
+		if (!groups[group]) { groups[group] = [] };
+		groups[group].push(val);
+	}
+	return Object.values(groups);
+}
+
+const processErrorLines = (diags: ChapelDiagnostic[]): ChapelDiagnostic[] => {
+	let processedDiags: ChapelDiagnostic[] = [];
+
+	const groups = groupBy<ChapelDiagnostic>(diags, (diag: ChapelDiagnostic) => [diag.file, diag.line]);
+	for (let group of groups) {
+		// Skip lines pointing to the Chapel stdlib 
+		if (group[0].file.startsWith("$CHPL_HOME")) {
+			continue;
+		}
+		// Join lines relating to the same source line
+		else {
+			let combined = group[0];
+			for (let diag of group.slice(1)) {
+				combined.message += " " + diag.message;
+			}
+			processedDiags.push(combined);
+		}
+	}
+	return processedDiags;
+}
 
 
 const run_chapel = (target_file: string, includes: string[]): Array<string> => {
@@ -143,6 +182,8 @@ export const diagnose = (targetPath: string, lspRoot: LspRoot): ChapelDiagnostic
 	const includes = lspRoot ? read_includes(lspRoot) : [];
 
 	let errors = run_chapel(targetPath, includes);
-	let diags = errors.map(parse_error_line);
+	let diags = errors.map(parse_error_line)
+	                  .filter((diag): diag is ChapelDiagnostic => (diag != undefined));
+	diags = processErrorLines(diags);	
 	return diags;
 }
