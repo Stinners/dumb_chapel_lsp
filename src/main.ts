@@ -17,7 +17,7 @@ import {
 	TextDocument
 } from 'vscode-languageserver-textdocument';
 
-import { diagnose, ChapelDiagnostic } from "./chapel";
+import { diagnose, ChapelDiagnostic, cleanUri } from "./chapel";
 import { info, error } from "./logger";
 
 /*==========================================================
@@ -39,6 +39,7 @@ let lspRoot: string | null | undefined = undefined;
 connection.onInitialize((params: InitializeParams) => {
 	info("onInitialize Event");
 
+	// TODO move this into a chapel specific function
 	if (params.workspaceFolders && params.workspaceFolders.length != 0) {
 		lspRoot = params.workspaceFolders[0].uri;
 	}
@@ -53,14 +54,6 @@ connection.onInitialize((params: InitializeParams) => {
 	hasWorkspaceFolderCapability = !!(
 		capabilities.workspace && !!capabilities.workspace.workspaceFolders
 	);
-
-	/*
-	hasDiagnosticRelatedInformationCapability = !!(
-		capabilities.textDocument &&
-		capabilities.textDocument.publishDiagnostics &&
-		capabilities.textDocument.publishDiagnostics.relatedInformation
-	);
-	*/
 
 	const result: InitializeResult = {
 		capabilities: <ServerCapabilities>{
@@ -126,18 +119,25 @@ documents.onDidSave((change: TextDocumentChangeEvent<TextDocument>) => {
 	info("onDidSave Event");
 
 	let textDocument = change.document;
-	let targetPath = textDocument.uri;
+	let thisFile = textDocument.uri;
+	let filePath = cleanUri(thisFile);
 	let chapelDiags: ChapelDiagnostic[] = [];
 	try {
-		chapelDiags = diagnose(targetPath, lspRoot);
+		chapelDiags = diagnose(thisFile, lspRoot);
 	} catch (exception) {
 		info(`Exception: ${exception}`);
 		return;
 	}
 
+	info(`Open file ${textDocument.uri}`);
+
 	let diagnostics: Diagnostic[] = [];
-	chapelDiags.forEach(chapelDiag => {
-		error(`Diagnostic Line: ${chapelDiag.line}`);
+
+	for (const chapelDiag of chapelDiags) {
+		info(`Diagnostic Line: ${chapelDiag.line}`);
+
+		if (chapelDiag.file != filePath) { continue; }
+
 		let diagnostic: Diagnostic = {
 			severity: DiagnosticSeverity.Error,
 			range: {
@@ -148,9 +148,9 @@ documents.onDidSave((change: TextDocumentChangeEvent<TextDocument>) => {
 			source: "Chapel LSP",
 		};
 		diagnostics.push(diagnostic);
-	});
+	};
 
-	connection.sendDiagnostics({ uri: targetPath, diagnostics });
+	connection.sendDiagnostics({ uri: thisFile!, diagnostics });
 });
 
 connection.onDidChangeWatchedFiles(_change => {});

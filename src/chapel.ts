@@ -165,7 +165,7 @@ const run_chapel = (target_file: string, includes: string[]): Array<string> => {
  * e.g .file://<path>
  * This function cleans that away so that we can use the paths easily
  */
-const cleanUri = (str: LspRoot): LspRoot => {
+export const cleanUri = (str: LspRoot): LspRoot => {
 	if (str && str.startsWith("file:\/\/\/")) {
 		return str.slice(7);
 	} else {
